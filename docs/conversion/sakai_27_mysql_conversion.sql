@@ -8,7 +8,6 @@ ALTER TABLE tagservice_tag ADD CONSTRAINT tagservice_tag_ibfk_1
     FOREIGN KEY (tagcollectionid) REFERENCES tagservice_collection(tagcollectionid)
     ON DELETE RESTRICT ON UPDATE RESTRICT;
 
-START TRANSACTION;
 INSERT INTO tagservice_collection
     (tagcollectionid, name, description, creationdate, lastmodificationdate,
      lastsynchronizationdate, externalupdate, externalcreation, lastupdatedateinexternalsystem)
@@ -25,7 +24,6 @@ INSERT INTO tagservice_tag
 INSERT INTO tagservice_tagassociation (id, item_id, tag_id)
     SELECT UUID(), TOPIC_ID, CONCAT('conv-', LPAD(CAST(TAG AS CHAR), 31, '0'))
     FROM CONV_TOPIC_TAGS;
-COMMIT;
 
 DROP TABLE CONV_TOPIC_TAGS;
 DROP TABLE CONV_TAGS;
