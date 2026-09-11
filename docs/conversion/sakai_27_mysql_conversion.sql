@@ -4,8 +4,9 @@
 ALTER TABLE tagservice_tag DROP FOREIGN KEY tagservice_tag_ibfk_1;
 ALTER TABLE tagservice_collection MODIFY tagcollectionid VARCHAR(99) NOT NULL;
 ALTER TABLE tagservice_tag MODIFY tagcollectionid VARCHAR(99) NOT NULL;
-ALTER TABLE tagservice_tag ADD CONSTRAINT tagservice_tag_fk
-    FOREIGN KEY (tagcollectionid) REFERENCES tagservice_collection(tagcollectionid);
+ALTER TABLE tagservice_tag ADD CONSTRAINT tagservice_tag_ibfk_1
+    FOREIGN KEY (tagcollectionid) REFERENCES tagservice_collection(tagcollectionid)
+    ON DELETE RESTRICT ON UPDATE RESTRICT;
 
 START TRANSACTION;
 INSERT INTO tagservice_collection
