@@ -8,6 +8,7 @@ BEGIN
     DECLARE fk_name VARCHAR(64);
     DECLARE source_exists INT DEFAULT 0;
     DECLARE invalid_links INT DEFAULT 0;
+    DECLARE links_exist INT DEFAULT 0;
     DECLARE EXIT HANDLER FOR SQLEXCEPTION
     BEGIN
         ROLLBACK;
@@ -31,17 +32,21 @@ BEGIN
 
     SELECT COUNT(*) INTO source_exists FROM information_schema.TABLES
       WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'CONV_TAGS';
+    SELECT COUNT(*) INTO links_exist FROM information_schema.TABLES
+      WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'CONV_TOPIC_TAGS';
+    START TRANSACTION;
     IF source_exists > 0 THEN
-        -- Reject orphaned or cross-site links rather than silently dropping them.
-        SELECT COUNT(*) INTO invalid_links FROM CONV_TOPIC_TAGS ct
-          LEFT JOIN CONV_TAGS t ON t.TAG_ID = ct.TAG
-          LEFT JOIN CONV_TOPICS topic ON topic.TOPIC_ID = ct.TOPIC_ID
-          WHERE t.TAG_ID IS NULL OR topic.TOPIC_ID IS NULL OR t.SITE_ID <> topic.SITE_ID;
-        IF invalid_links > 0 THEN
-            SIGNAL SQLSTATE '45000' SET MESSAGE_TEXT = 'SAK-52889: repair orphaned or cross-site Conversations tag links before conversion';
-        END IF;
+        IF links_exist > 0 THEN
+            -- Reject orphaned or cross-site links rather than silently dropping them.
+            SELECT COUNT(*) INTO invalid_links FROM CONV_TOPIC_TAGS ct
+              LEFT JOIN CONV_TAGS t ON t.TAG_ID = ct.TAG
+              LEFT JOIN CONV_TOPICS topic ON topic.TOPIC_ID = ct.TOPIC_ID
+              WHERE t.TAG_ID IS NULL OR topic.TOPIC_ID IS NULL OR t.SITE_ID <> topic.SITE_ID;
+            IF invalid_links > 0 THEN
+                SIGNAL SQLSTATE '45000' SET MESSAGE_TEXT = 'SAK-52889: repair orphaned or cross-site Conversations tag links before conversion';
+            END IF;
 
-        START TRANSACTION;
+        END IF;
         INSERT INTO tagservice_collection
           (tagcollectionid, name, description, creationdate, lastmodificationdate,
            lastsynchronizationdate, externalupdate, externalcreation, lastupdatedateinexternalsystem)
@@ -66,12 +71,16 @@ BEGIN
             SIGNAL SQLSTATE '45000' SET MESSAGE_TEXT = 'SAK-52889: migrated tag verification failed; source tables retained';
         END IF;
 
-        INSERT INTO tagservice_tagassociation (id, item_id, tag_id)
-          SELECT UUID(), ct.TOPIC_ID, CONCAT('conv-', LPAD(CAST(ct.TAG AS CHAR), 31, '0'))
-          FROM CONV_TOPIC_TAGS ct WHERE NOT EXISTS
-            (SELECT 1 FROM tagservice_tagassociation a WHERE a.item_id = ct.TOPIC_ID
-              AND a.tag_id = CONCAT('conv-', LPAD(CAST(ct.TAG AS CHAR), 31, '0')));
+        IF links_exist > 0 THEN
+            INSERT INTO tagservice_tagassociation (id, item_id, tag_id)
+              SELECT UUID(), ct.TOPIC_ID, CONCAT('conv-', LPAD(CAST(ct.TAG AS CHAR), 31, '0'))
+              FROM CONV_TOPIC_TAGS ct WHERE NOT EXISTS
+                (SELECT 1 FROM tagservice_tagassociation a WHERE a.item_id = ct.TOPIC_ID
+                  AND a.tag_id = CONCAT('conv-', LPAD(CAST(ct.TAG AS CHAR), 31, '0')));
 
+        END IF;
+    END IF;
+    IF links_exist > 0 THEN
         SELECT COUNT(*) INTO invalid_links FROM CONV_TOPIC_TAGS ct
           WHERE NOT EXISTS (SELECT 1 FROM tagservice_tagassociation a
             WHERE a.item_id = ct.TOPIC_ID AND a.tag_id = CONCAT('conv-', LPAD(CAST(ct.TAG AS CHAR), 31, '0')));
@@ -79,10 +88,11 @@ BEGIN
             ROLLBACK;
             SIGNAL SQLSTATE '45000' SET MESSAGE_TEXT = 'SAK-52889: tag association verification failed';
         END IF;
-        COMMIT;
-        DROP TABLE CONV_TOPIC_TAGS;
-        DROP TABLE CONV_TAGS;
     END IF;
+    COMMIT;
+    -- Each drop is independent so an interrupted cleanup can be resumed.
+    DROP TABLE IF EXISTS CONV_TOPIC_TAGS;
+    DROP TABLE IF EXISTS CONV_TAGS;
     DROP TABLE IF EXISTS CONV_TAGS_S;
     DROP TABLE IF EXISTS TAGGABLE_LINK;
 END //
